@@ -1,0 +1,466 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────
+
+enum Role {
+  user
+  moderator
+  admin
+}
+
+enum FollowStatus {
+  pending
+  accepted
+}
+
+enum MediaType {
+  image
+  video
+}
+
+enum LikeTargetType {
+  post
+  comment
+  reel
+}
+
+enum ReportTargetType {
+  post
+  comment
+  user
+  reel
+  story
+}
+
+enum ReportReason {
+  spam
+  nudity
+  harassment
+  hate_speech
+  violence
+  other
+}
+
+enum ReportStatus {
+  pending
+  reviewed
+  action_taken
+  dismissed
+}
+
+enum AdminActionType {
+  ban_user
+  unban_user
+  delete_post
+  delete_comment
+  delete_reel
+  delete_story
+  delete_user
+  verify_user
+  dismiss_report
+  warn_user
+  change_role
+  block_hashtag
+}
+
+enum NotificationType {
+  like
+  comment
+  follow
+  follow_request
+  mention
+}
+
+enum MessageType {
+  text
+  image
+  post_share
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Users & social graph
+// ─────────────────────────────────────────────────────────────────────────
+
+model User {
+  id           Int     @id @default(autoincrement())
+  username     String  @unique
+  email        String  @unique
+  passwordHash String  @map("password_hash")
+  fullName     String? @map("full_name")
+  bio          String?
+  website      String?
+  avatarUrl    String? @map("avatar_url")
+  isPrivate    Boolean @default(false) @map("is_private")
+
+  role        Role      @default(user)
+  isBanned    Boolean   @default(false) @map("is_banned")
+  isVerified  Boolean   @default(false) @map("is_verified")
+  lastLoginAt DateTime? @map("last_login_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // relations
+  posts                  Post[]
+  reels                  Reel[]
+  stories                Story[]
+  comments               Comment[]
+  likes                  Like[]
+  savedPosts             SavedPost[]
+  notifications          Notification[]            @relation("NotificationRecipient")
+  triggeredNotifications Notification[]            @relation("NotificationActor")
+  followers              Follow[]                  @relation("Following")
+  following              Follow[]                  @relation("Follower")
+  blockedByMe            BlockedUser[]             @relation("Blocker")
+  blockedMe              BlockedUser[]             @relation("Blocked")
+  refreshTokens          RefreshToken[]
+  passwordResetTokens    PasswordResetToken[]
+  storyViews             StoryView[]
+  conversations          ConversationParticipant[]
+  messagesSent           Message[]
+  reportsFiled           Report[]                  @relation("Reporter")
+  reportsReviewed        Report[]                  @relation("Reviewer")
+  adminActions           AdminAction[]
+
+  @@index([email])
+  @@index([username])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        Int       @id @default(autoincrement())
+  // Embedded in the JWT as the `jti` claim. Deliberately NOT the same as `id` —
+  // `id` is a sequential internal PK, `jti` stays an unguessable random value so
+  // a refresh token's JWT payload never leaks "how many tokens have ever been issued".
+  jti       String    @unique @default(uuid())
+  userId    Int       @map("user_id")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @map("token_hash")
+  userAgent String?   @map("user_agent")
+  ip        String?
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model PasswordResetToken {
+  id        Int       @id @default(autoincrement())
+  userId    Int       @map("user_id")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+model Follow {
+  id          Int          @id @default(autoincrement())
+  followerId  Int          @map("follower_id")
+  follower    User         @relation("Follower", fields: [followerId], references: [id], onDelete: Cascade)
+  followingId Int          @map("following_id")
+  following   User         @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
+  status      FollowStatus @default(accepted)
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  @@unique([followerId, followingId])
+  @@index([followingId, status])
+  @@map("follows")
+}
+
+model BlockedUser {
+  id        Int      @id @default(autoincrement())
+  blockerId Int      @map("blocker_id")
+  blocker   User     @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blockedId Int      @map("blocked_id")
+  blocked   User     @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([blockerId, blockedId])
+  @@map("blocked_users")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Posts, media, hashtags
+// ─────────────────────────────────────────────────────────────────────────
+
+model Post {
+  id           Int       @id @default(autoincrement())
+  userId       Int       @map("user_id")
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  caption      String?
+  likeCount    Int       @default(0) @map("like_count")
+  commentCount Int       @default(0) @map("comment_count")
+  deletedAt    DateTime? @map("deleted_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  media    PostMedia[]
+  comments Comment[]
+  savedBy  SavedPost[]
+  hashtags PostHashtag[]
+
+  @@index([userId, createdAt])
+  @@map("posts")
+}
+
+model PostMedia {
+  id         Int       @id @default(autoincrement())
+  postId     Int       @map("post_id")
+  post       Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  mediaType  MediaType @map("media_type")
+  storageKey String    @map("storage_key")
+  cdnUrl     String    @map("cdn_url")
+  width      Int?
+  height     Int?
+  orderIndex Int       @default(0) @map("order_index")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([postId, orderIndex])
+  @@map("post_media")
+}
+
+model Hashtag {
+  id        Int      @id @default(autoincrement())
+  tag       String   @unique
+  postCount Int      @default(0) @map("post_count")
+  isBlocked Boolean  @default(false) @map("is_blocked")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  posts PostHashtag[]
+
+  @@index([tag])
+  @@map("hashtags")
+}
+
+model PostHashtag {
+  postId    Int     @map("post_id")
+  post      Post    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  hashtagId Int     @map("hashtag_id")
+  hashtag   Hashtag @relation(fields: [hashtagId], references: [id], onDelete: Cascade)
+
+  @@id([postId, hashtagId])
+  @@map("post_hashtags")
+}
+
+model SavedPost {
+  id             Int      @id @default(autoincrement())
+  userId         Int      @map("user_id")
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postId         Int      @map("post_id")
+  post           Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  collectionName String   @default("All Posts") @map("collection_name")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, postId])
+  @@map("saved_posts")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Likes & comments (shared across posts / comments / reels)
+// ─────────────────────────────────────────────────────────────────────────
+
+model Like {
+  id         Int            @id @default(autoincrement())
+  userId     Int            @map("user_id")
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  targetType LikeTargetType @map("target_type")
+  targetId   Int            @map("target_id")
+  createdAt  DateTime       @default(now()) @map("created_at")
+
+  @@unique([userId, targetType, targetId])
+  @@index([targetType, targetId])
+  @@map("likes")
+}
+
+model Comment {
+  id              Int       @id @default(autoincrement())
+  postId          Int       @map("post_id")
+  post            Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId          Int       @map("user_id")
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parentCommentId Int?      @map("parent_comment_id")
+  parentComment   Comment?  @relation("CommentReplies", fields: [parentCommentId], references: [id], onDelete: Cascade)
+  replies         Comment[] @relation("CommentReplies")
+  content         String
+  likeCount       Int       @default(0) @map("like_count")
+  deletedAt       DateTime? @map("deleted_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  @@index([postId, createdAt])
+  @@index([parentCommentId])
+  @@map("comments")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Stories
+// ─────────────────────────────────────────────────────────────────────────
+
+model Story {
+  id         Int       @id @default(autoincrement())
+  userId     Int       @map("user_id")
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mediaType  MediaType @map("media_type")
+  storageKey String    @map("storage_key")
+  cdnUrl     String    @map("cdn_url")
+  viewCount  Int       @default(0) @map("view_count")
+  isActive   Boolean   @default(true) @map("is_active")
+  expiresAt  DateTime  @map("expires_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  views StoryView[]
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt])
+  @@map("stories")
+}
+
+model StoryView {
+  id       Int      @id @default(autoincrement())
+  storyId  Int      @map("story_id")
+  story    Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  viewerId Int      @map("viewer_id")
+  viewer   User     @relation(fields: [viewerId], references: [id], onDelete: Cascade)
+  viewedAt DateTime @default(now()) @map("viewed_at")
+
+  @@unique([storyId, viewerId])
+  @@map("story_views")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Reels
+// ─────────────────────────────────────────────────────────────────────────
+
+model Reel {
+  id              Int       @id @default(autoincrement())
+  userId          Int       @map("user_id")
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  caption         String?
+  storageKey      String    @map("storage_key")
+  cdnUrl          String    @map("cdn_url")
+  durationSeconds Int?      @map("duration_seconds")
+  likeCount       Int       @default(0) @map("like_count")
+  commentCount    Int       @default(0) @map("comment_count")
+  viewCount       Int       @default(0) @map("view_count")
+  deletedAt       DateTime? @map("deleted_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("reels")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Notifications
+// ─────────────────────────────────────────────────────────────────────────
+
+model Notification {
+  id         Int              @id @default(autoincrement())
+  userId     Int              @map("user_id")
+  user       User             @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  actorId    Int?             @map("actor_id")
+  actor      User?            @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  type       NotificationType
+  targetType String?          @map("target_type")
+  targetId   Int?             @map("target_id")
+  isRead     Boolean          @default(false) @map("is_read")
+  createdAt  DateTime         @default(now()) @map("created_at")
+
+  @@index([userId, isRead, createdAt])
+  @@map("notifications")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Direct messages
+// ─────────────────────────────────────────────────────────────────────────
+
+model Conversation {
+  id        Int      @id @default(autoincrement())
+  isGroup   Boolean  @default(false) @map("is_group")
+  groupName String?  @map("group_name")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  participants ConversationParticipant[]
+  messages     Message[]
+
+  @@map("conversations")
+}
+
+model ConversationParticipant {
+  conversationId    Int          @map("conversation_id")
+  conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId            Int          @map("user_id")
+  user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt          DateTime     @default(now()) @map("joined_at")
+  lastReadMessageId Int?         @map("last_read_message_id")
+
+  @@id([conversationId, userId])
+  @@map("conversation_participants")
+}
+
+model Message {
+  id             Int          @id @default(autoincrement())
+  conversationId Int          @map("conversation_id")
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       Int          @map("sender_id")
+  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  content        String?
+  mediaUrl       String?      @map("media_url")
+  messageType    MessageType  @default(text) @map("message_type")
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Reports & moderation
+// ─────────────────────────────────────────────────────────────────────────
+
+model Report {
+  id         Int              @id @default(autoincrement())
+  reporterId Int              @map("reporter_id")
+  reporter   User             @relation("Reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  targetType ReportTargetType @map("target_type")
+  targetId   Int              @map("target_id")
+  reason     ReportReason
+  details    String?
+  status     ReportStatus     @default(pending)
+  reviewedBy Int?             @map("reviewed_by")
+  reviewer   User?            @relation("Reviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
+  createdAt  DateTime         @default(now()) @map("created_at")
+  reviewedAt DateTime?        @map("reviewed_at")
+
+  @@index([status, createdAt])
+  @@index([targetType, targetId])
+  @@map("reports")
+}
+
+model AdminAction {
+  id         Int             @id @default(autoincrement())
+  adminId    Int             @map("admin_id")
+  admin      User            @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  actionType AdminActionType @map("action_type")
+  targetType String          @map("target_type")
+  targetId   Int             @map("target_id")
+  notes      String?
+  createdAt  DateTime        @default(now()) @map("created_at")
+
+  @@index([adminId, createdAt])
+  @@index([actionType, createdAt])
+  @@map("admin_actions")
+}

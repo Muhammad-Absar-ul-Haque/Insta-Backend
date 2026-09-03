@@ -1,0 +1,32 @@
+# dependencies
+/node_modules
+
+# compiled output
+/dist
+*.tsbuildinfo
+
+# env
+.env
+.env.*
+!.env.example
+
+# logs
+*.log
+npm-debug.log*
+
+# tests
+/coverage
+
+# editors
+/.vscode/*
+!/.vscode/settings.json
+!/.vscode/tasks.json
+!/.vscode/launch.json
+!/.vscode/extensions.json
+.idea
+
+# OS
+.DS_Store
+Thumbs.db
+
+/docs

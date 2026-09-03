@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { FollowStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { S3Service } from '../media/s3.service';
+import { CloudinaryService } from '../media/cloudinary.service';
 import { CursorPaginationDto } from '../common/dto/cursor-pagination.dto';
 import { buildCursorArgs, toCursorPage } from '../common/utils/pagination.util';
 import {
@@ -27,40 +27,31 @@ export interface StoryItem {
 
 const STORY_TTL_MS = 24 * 60 * 60 * 1000;
 
-const CONTENT_TYPE_EXTENSION: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-  'video/mp4': 'mp4',
-  'video/quicktime': 'mov',
-};
-
 @Injectable()
 export class StoriesService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly s3: S3Service,
+    private readonly cloudinary: CloudinaryService,
   ) {}
 
   async create(userId: number, dto: CreateStoryDto) {
-    const extension = CONTENT_TYPE_EXTENSION[dto.contentType];
-    const storageKey = this.s3.buildKey('stories', userId, extension);
-    const { uploadUrl, cdnUrl } = await this.s3.createPresignedUpload(
-      storageKey,
-      dto.contentType,
+    const signed = this.cloudinary.createSignedUpload(
+      'stories',
+      userId,
+      dto.mediaType,
     );
 
     const story = await this.prisma.story.create({
       data: {
         userId,
         mediaType: dto.mediaType,
-        storageKey,
-        cdnUrl,
+        storageKey: signed.publicId,
+        cdnUrl: signed.cdnUrl,
         expiresAt: new Date(Date.now() + STORY_TTL_MS),
       },
     });
 
-    return { storyId: story.id, uploadUrl, expiresAt: story.expiresAt };
+    return { storyId: story.id, expiresAt: story.expiresAt, ...signed };
   }
 
   /** Active stories from people the viewer follows, plus their own, grouped by author. */

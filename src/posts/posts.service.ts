@@ -7,7 +7,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { FollowStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { S3Service } from '../media/s3.service';
+import { CloudinaryService } from '../media/cloudinary.service';
 import { CursorPaginationDto } from '../common/dto/cursor-pagination.dto';
 import { buildCursorArgs, toCursorPage } from '../common/utils/pagination.util';
 import {
@@ -21,20 +21,11 @@ import { QUEUE_NAMES } from '../jobs/queue.constants';
 import { FeedFanoutJobData } from '../jobs/processors/feed-fanout.processor';
 import { HashtagExtractionJobData } from '../jobs/processors/hashtag-extraction.processor';
 
-const CONTENT_TYPE_EXTENSION: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-  'video/mp4': 'mp4',
-  'video/quicktime': 'mov',
-  'video/webm': 'webm',
-};
-
 @Injectable()
 export class PostsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly s3: S3Service,
+    private readonly cloudinary: CloudinaryService,
     @InjectQueue(QUEUE_NAMES.FEED_FANOUT)
     private readonly feedFanoutQueue: Queue<FeedFanoutJobData>,
     @InjectQueue(QUEUE_NAMES.HASHTAG_EXTRACTION)
@@ -48,22 +39,21 @@ export class PostsService {
 
     const uploads = await Promise.all(
       dto.media.map(async (item, index) => {
-        const extension = CONTENT_TYPE_EXTENSION[item.contentType];
-        const storageKey = this.s3.buildKey('posts', userId, extension);
-        const { uploadUrl, cdnUrl } = await this.s3.createPresignedUpload(
-          storageKey,
-          item.contentType,
+        const signed = this.cloudinary.createSignedUpload(
+          'posts',
+          userId,
+          item.mediaType,
         );
         const postMedia = await this.prisma.postMedia.create({
           data: {
             postId: post.id,
             mediaType: item.mediaType,
-            storageKey,
-            cdnUrl,
+            storageKey: signed.publicId,
+            cdnUrl: signed.cdnUrl,
             orderIndex: index,
           },
         });
-        return { postMediaId: postMedia.id, uploadUrl };
+        return { postMediaId: postMedia.id, ...signed };
       }),
     );
 

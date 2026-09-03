@@ -21,14 +21,10 @@ export default () => ({
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN ?? '7d',
   },
 
-  s3: {
-    endpoint: process.env.S3_ENDPOINT,
-    region: process.env.S3_REGION ?? 'us-east-1',
-    bucket: process.env.S3_BUCKET ?? 'insta-clone-media',
-    accessKeyId: process.env.S3_ACCESS_KEY_ID,
-    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
-    forcePathStyle: (process.env.S3_FORCE_PATH_STYLE ?? 'true') === 'true',
-    cdnBaseUrl: process.env.CDN_BASE_URL,
+  cloudinary: {
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME,
+    apiKey: process.env.CLOUDINARY_API_KEY,
+    apiSecret: process.env.CLOUDINARY_API_SECRET,
   },
 
   throttle: {

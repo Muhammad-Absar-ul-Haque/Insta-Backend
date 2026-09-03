@@ -2,12 +2,13 @@
 
 A production-shaped Instagram clone backend: auth, profiles, posts, stories, reels, a hybrid fan-out feed, social graph, likes/comments, direct messages, realtime notifications, search, saved posts, reporting, and a full admin/moderation panel.
 
-**Stack:** NestJS 10 (Express, CommonJS) · PostgreSQL via Prisma 6 · Redis + BullMQ · S3-compatible storage (MinIO locally) · Socket.IO (with the Redis adapter for multi-instance delivery) · JWT auth · Swagger.
+**Stack:** NestJS 10 (Express, CommonJS) · PostgreSQL via Prisma 6 · Redis + BullMQ · Cloudinary (media storage/delivery, signed client-side uploads) · Socket.IO (with the Redis adapter for multi-instance delivery) · JWT auth · Swagger.
 
 ## Prerequisites
 
 - Node.js 20+
-- Docker Desktop (for Postgres, Redis, MinIO)
+- Docker Desktop (for Postgres, Redis)
+- A free [Cloudinary](https://cloudinary.com) account (for media storage)
 
 ## Setup
 
@@ -16,13 +17,15 @@ npm install
 cp .env.example .env   # already done if you're reading this from the repo as generated
 ```
 
-Fill in `.env` — `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` should be long random strings in any real deployment (`.env` ships with generated dev-only secrets).
+Fill in `.env`:
+- `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` should be long random strings in any real deployment (`.env` ships with generated dev-only secrets).
+- `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` from your Cloudinary dashboard (cloudinary.com/console) — required, the app won't generate valid upload signatures without real values here.
 
 ## Running the stack
 
 ```bash
-docker compose up -d postgres redis minio   # infra only; run the API with npm for hot-reload
-npx prisma migrate dev                       # creates the schema, run once and after schema.prisma changes
+docker compose up -d postgres redis   # infra only; run the API with npm for hot-reload
+npx prisma migrate dev                 # creates the schema, run once and after schema.prisma changes
 npm run start:dev
 ```
 
@@ -30,7 +33,7 @@ The API listens on `http://localhost:3000/api`. Swagger docs are at `http://loca
 
 To run everything (including the API) in Docker: `docker compose up --build`.
 
-MinIO's console is at `http://localhost:9001` (user/pass: `minioadmin` / `minioadmin`) — create the bucket named in `S3_BUCKET` (`insta-clone-media` by default) before uploading media through the app.
+Media (avatars, posts, stories, reels) uploads directly from the client to Cloudinary using a signature this API generates — see [`docs/users.md`](./docs/users.md) for the exact flow. Nothing to stand up locally for this beyond a Cloudinary account.
 
 ## Tests
 

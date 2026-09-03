@@ -20,8 +20,6 @@
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1124.0",
-    "@aws-sdk/s3-request-presigner": "^3.1124.0",
     "@nestjs/bullmq": "^10.2.3",
     "@nestjs/common": "^10.0.0",
     "@nestjs/config": "^3.3.0",
@@ -39,6 +37,7 @@
     "bullmq": "^5.81.4",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.4",
+    "cloudinary": "^2.11.0",
     "helmet": "^8.3.0",
     "ioredis": "^6.0.0",
     "passport": "^0.7.0",

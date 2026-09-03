@@ -37,7 +37,15 @@ class EnvironmentVariables {
 
   @IsString()
   @IsNotEmpty()
-  S3_BUCKET: string;
+  CLOUDINARY_CLOUD_NAME: string;
+
+  @IsString()
+  @IsNotEmpty()
+  CLOUDINARY_API_KEY: string;
+
+  @IsString()
+  @IsNotEmpty()
+  CLOUDINARY_API_SECRET: string;
 }
 
 export function validate(config: Record<string, unknown>) {

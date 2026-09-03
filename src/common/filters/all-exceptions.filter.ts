@@ -24,17 +24,23 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const request = ctx.getRequest<Request>();
 
     const isHttpException = exception instanceof HttpException;
-    const status = isHttpException ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
+    const status = isHttpException
+      ? exception.getStatus()
+      : HttpStatus.INTERNAL_SERVER_ERROR;
     const responseBody = isHttpException
       ? exception.getResponse()
       : { statusCode: status, message: 'Internal server error' };
 
-    const errorMessage = exception instanceof Error ? exception.message : String(exception);
+    const errorMessage =
+      exception instanceof Error ? exception.message : String(exception);
     const logLine = `${request.method} ${request.originalUrl} -> ${status}: ${errorMessage}`;
 
     if (status >= 500) {
       // Unexpected — a real bug, not a client mistake. Log the stack so it's actually debuggable.
-      this.logger.error(logLine, exception instanceof Error ? exception.stack : undefined);
+      this.logger.error(
+        logLine,
+        exception instanceof Error ? exception.stack : undefined,
+      );
     } else {
       // Expected client-facing errors (validation, 401/403/404/409...) — message is enough, no stack noise.
       this.logger.warn(logLine);

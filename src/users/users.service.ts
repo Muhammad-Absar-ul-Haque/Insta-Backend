@@ -6,25 +6,18 @@ import {
 } from '@nestjs/common';
 import { FollowStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { S3Service } from '../media/s3.service';
+import { CloudinaryService } from '../media/cloudinary.service';
 import {
   toUserSummary,
   USER_SUMMARY_SELECT,
 } from '../common/utils/user-summary.util';
 import { UpdateProfileDto } from './dto/update-profile.dto';
-import { RequestAvatarUploadDto } from './dto/request-avatar-upload.dto';
-
-const CONTENT_TYPE_EXTENSION: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-};
 
 @Injectable()
 export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly s3: S3Service,
+    private readonly cloudinary: CloudinaryService,
   ) {}
 
   async getProfileByUsername(username: string, viewerId: number) {
@@ -106,14 +99,13 @@ export class UsersService {
     return toUserSummary(user);
   }
 
-  async requestAvatarUpload(userId: number, dto: RequestAvatarUploadDto) {
-    const extension = CONTENT_TYPE_EXTENSION[dto.contentType];
-    const storageKey = this.s3.buildKey('avatars', userId, extension);
-    const { uploadUrl, cdnUrl } = await this.s3.createPresignedUpload(
-      storageKey,
-      dto.contentType,
+  async requestAvatarUpload(userId: number) {
+    const signed = this.cloudinary.createSignedUpload(
+      'avatars',
+      userId,
+      'image',
     );
-    return { uploadUrl, avatarUrl: cdnUrl };
+    return { ...signed, avatarUrl: signed.cdnUrl };
   }
 
   async blockUser(blockerId: number, blockedId: number) {

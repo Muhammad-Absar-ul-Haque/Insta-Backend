@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { S3Service } from '../media/s3.service';
+import { CloudinaryService } from '../media/cloudinary.service';
 import { CursorPaginationDto } from '../common/dto/cursor-pagination.dto';
 import { toCursorPage } from '../common/utils/pagination.util';
 import {
@@ -10,39 +10,28 @@ import {
 } from './reels.util';
 import { CreateReelDto } from './dto/create-reel.dto';
 
-const CONTENT_TYPE_EXTENSION: Record<string, string> = {
-  'video/mp4': 'mp4',
-  'video/quicktime': 'mov',
-  'video/webm': 'webm',
-};
-
 @Injectable()
 export class ReelsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly s3: S3Service,
+    private readonly cloudinary: CloudinaryService,
   ) {}
 
   async create(userId: number, dto: CreateReelDto) {
-    const extension = CONTENT_TYPE_EXTENSION[dto.contentType];
-    const storageKey = this.s3.buildKey('reels', userId, extension);
-    const { uploadUrl, cdnUrl } = await this.s3.createPresignedUpload(
-      storageKey,
-      dto.contentType,
-    );
+    const signed = this.cloudinary.createSignedUpload('reels', userId, 'video');
 
     const reel = await this.prisma.reel.create({
       data: {
         userId,
         caption: dto.caption,
-        storageKey,
-        cdnUrl,
+        storageKey: signed.publicId,
+        cdnUrl: signed.cdnUrl,
         durationSeconds: dto.durationSeconds,
       },
       include: REEL_WITH_RELATIONS_INCLUDE,
     });
 
-    return { reel: toReelSummary(reel, false), uploadUrl };
+    return { reel: toReelSummary(reel, false), ...signed };
   }
 
   /** Basic engagement ranking (likes, then views, then recency) over recent reels. */

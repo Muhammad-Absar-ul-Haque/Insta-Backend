@@ -39,9 +39,11 @@ export class UsersController {
   })
   requestAvatarUpload(
     @CurrentUser() user: AuthenticatedUser,
-    @Body() dto: RequestAvatarUploadDto,
+    // Body still validated (kept as documentation of intent + allowed types), even
+    // though the signed-upload flow no longer needs contentType to pick a file extension.
+    @Body() _dto: RequestAvatarUploadDto,
   ) {
-    return this.usersService.requestAvatarUpload(user.id, dto);
+    return this.usersService.requestAvatarUpload(user.id);
   }
 
   @Get('me/blocked')

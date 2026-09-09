@@ -1,8 +1,13 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { FollowStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CloudinaryService } from '../media/cloudinary.service';
 import { CursorPaginationDto } from '../common/dto/cursor-pagination.dto';
-import { toCursorPage } from '../common/utils/pagination.util';
+import { buildCursorArgs, toCursorPage } from '../common/utils/pagination.util';
 import {
   getLikedReelIds,
   REEL_WITH_RELATIONS_INCLUDE,
@@ -37,7 +42,10 @@ export class ReelsService {
   /** Basic engagement ranking (likes, then views, then recency) over recent reels. */
   async getFeed(viewerId: number, pagination: CursorPaginationDto) {
     const rows = await this.prisma.reel.findMany({
-      where: { deletedAt: null },
+      where: {
+        deletedAt: null,
+        user: { deletedAt: null, deactivatedAt: null },
+      },
       include: REEL_WITH_RELATIONS_INCLUDE,
       take: pagination.limit + 1,
       ...(pagination.cursor
@@ -70,6 +78,58 @@ export class ReelsService {
     });
     if (result.count === 0) {
       throw new NotFoundException('Reel not found');
+    }
+  }
+
+  async listByUser(
+    targetUserId: number,
+    viewerId: number,
+    pagination: CursorPaginationDto,
+  ) {
+    await this.assertVisible(targetUserId, viewerId);
+
+    const rows = await this.prisma.reel.findMany({
+      where: { userId: targetUserId, deletedAt: null },
+      include: REEL_WITH_RELATIONS_INCLUDE,
+      ...buildCursorArgs(pagination),
+    });
+    const { items, nextCursor } = toCursorPage(rows, pagination.limit);
+    const likedIds = await getLikedReelIds(
+      this.prisma,
+      viewerId,
+      items.map((r) => r.id),
+    );
+    return {
+      items: items.map((reel) => toReelSummary(reel, likedIds.has(reel.id))),
+      nextCursor,
+    };
+  }
+
+  /** Same visibility rule as posts: private account + not following → forbidden. */
+  private async assertVisible(
+    targetUserId: number,
+    viewerId: number,
+  ): Promise<void> {
+    if (targetUserId === viewerId) return;
+
+    const target = await this.prisma.user.findUnique({
+      where: { id: targetUserId },
+    });
+    if (!target || target.deletedAt || target.deactivatedAt) {
+      throw new NotFoundException('User not found');
+    }
+    if (!target.isPrivate) return;
+
+    const follow = await this.prisma.follow.findUnique({
+      where: {
+        followerId_followingId: {
+          followerId: viewerId,
+          followingId: targetUserId,
+        },
+      },
+    });
+    if (follow?.status !== FollowStatus.accepted) {
+      throw new ForbiddenException('This account is private');
     }
   }
 }

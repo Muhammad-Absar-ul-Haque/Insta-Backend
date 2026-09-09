@@ -7,6 +7,7 @@ import {
   HttpStatus,
   Param,
   ParseIntPipe,
+  Patch,
   Post,
   Query,
 } from '@nestjs/common';
@@ -67,5 +68,28 @@ export class CommentsController {
     @Param('id', ParseIntPipe) id: number,
   ) {
     return this.likesService.like(user.id, LikeTargetType.comment, id);
+  }
+
+  @Patch(':id/pin')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary:
+      'Pin a top-level comment to the top of your post (post owner only, max 3)',
+  })
+  pin(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.commentsService.setPinned(user.id, id, true);
+  }
+
+  @Patch(':id/unpin')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Unpin a comment (post owner only)' })
+  unpin(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.commentsService.setPinned(user.id, id, false);
   }
 }

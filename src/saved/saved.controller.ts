@@ -2,7 +2,7 @@ import { Controller, Get, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../common/types/authenticated-user.interface';
-import { CursorPaginationDto } from '../common/dto/cursor-pagination.dto';
+import { ListSavedQueryDto } from './dto/list-saved-query.dto';
 import { SavedService } from './saved.service';
 
 @ApiTags('saved')
@@ -15,8 +15,14 @@ export class SavedController {
   @ApiOperation({ summary: 'List the current user’s saved posts' })
   listSaved(
     @CurrentUser() user: AuthenticatedUser,
-    @Query() pagination: CursorPaginationDto,
+    @Query() query: ListSavedQueryDto,
   ) {
-    return this.savedService.listSaved(user.id, pagination);
+    return this.savedService.listSaved(user.id, query, query.collection);
+  }
+
+  @Get('collections')
+  @ApiOperation({ summary: 'List the collections you have saved posts into' })
+  listCollections(@CurrentUser() user: AuthenticatedUser) {
+    return this.savedService.listCollections(user.id);
   }
 }

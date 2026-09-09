@@ -33,9 +33,13 @@ export class SavedService {
     await this.prisma.savedPost.deleteMany({ where: { userId, postId } });
   }
 
-  async listSaved(userId: number, pagination: CursorPaginationDto) {
+  async listSaved(
+    userId: number,
+    pagination: CursorPaginationDto,
+    collectionName?: string,
+  ) {
     const rows = await this.prisma.savedPost.findMany({
-      where: { userId },
+      where: { userId, ...(collectionName ? { collectionName } : {}) },
       include: { post: { include: POST_WITH_RELATIONS_INCLUDE } },
       take: pagination.limit + 1,
       ...(pagination.cursor
@@ -60,5 +64,32 @@ export class SavedService {
       ),
       nextCursor,
     };
+  }
+
+  /** Distinct collection names for this user, each with a count and a preview post. */
+  async listCollections(userId: number) {
+    const groups = await this.prisma.savedPost.groupBy({
+      by: ['collectionName'],
+      where: { userId },
+      _count: { _all: true },
+      orderBy: { collectionName: 'asc' },
+    });
+
+    return Promise.all(
+      groups.map(async (group) => {
+        const preview = await this.prisma.savedPost.findFirst({
+          where: { userId, collectionName: group.collectionName },
+          include: { post: { include: POST_WITH_RELATIONS_INCLUDE } },
+          orderBy: { createdAt: 'desc' },
+        });
+        return {
+          collectionName: group.collectionName,
+          count: group._count._all,
+          previewPost: preview
+            ? toPostSummary(preview.post, { isLiked: false, isSaved: true })
+            : null,
+        };
+      }),
+    );
   }
 }

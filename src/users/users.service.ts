@@ -3,8 +3,10 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { FollowStatus } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { CloudinaryService } from '../media/cloudinary.service';
 import {
@@ -12,6 +14,7 @@ import {
   USER_SUMMARY_SELECT,
 } from '../common/utils/user-summary.util';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { DeleteAccountDto } from './dto/delete-account.dto';
 
 @Injectable()
 export class UsersService {
@@ -24,7 +27,11 @@ export class UsersService {
     const user = await this.prisma.user.findUnique({
       where: { username },
     });
-    if (!user || user.deletedAt) {
+    if (
+      !user ||
+      user.deletedAt ||
+      (user.deactivatedAt && user.id !== viewerId)
+    ) {
       throw new NotFoundException('User not found');
     }
 
@@ -99,6 +106,44 @@ export class UsersService {
     return toUserSummary(user);
   }
 
+  async deactivateMe(userId: number): Promise<void> {
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: userId },
+        data: { deactivatedAt: new Date() },
+      }),
+      this.prisma.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+  }
+
+  async deleteMe(userId: number, dto: DeleteAccountDto): Promise<void> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.deletedAt) {
+      throw new NotFoundException('User not found');
+    }
+    const passwordMatches = await bcrypt.compare(
+      dto.password,
+      user.passwordHash,
+    );
+    if (!passwordMatches) {
+      throw new UnauthorizedException('Incorrect password');
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: userId },
+        data: { deletedAt: new Date() },
+      }),
+      this.prisma.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+  }
+
   async requestAvatarUpload(userId: number) {
     const signed = this.cloudinary.createSignedUpload(
       'avatars',
@@ -150,5 +195,86 @@ export class UsersService {
       orderBy: { createdAt: 'desc' },
     });
     return rows.map((row) => toUserSummary(row.blocked));
+  }
+
+  async restrictUser(restrictorId: number, restrictedId: number) {
+    if (restrictorId === restrictedId) {
+      throw new BadRequestException('You cannot restrict yourself');
+    }
+    const target = await this.prisma.user.findUnique({
+      where: { id: restrictedId },
+    });
+    if (!target || target.deletedAt) {
+      throw new NotFoundException('User not found');
+    }
+
+    try {
+      // Unlike blocking, restricting doesn't touch the follow relationship and
+      // isn't announced to the restricted user in any way.
+      await this.prisma.restrictedUser.create({
+        data: { restrictorId, restrictedId },
+      });
+    } catch {
+      throw new ConflictException('User is already restricted');
+    }
+  }
+
+  async unrestrictUser(
+    restrictorId: number,
+    restrictedId: number,
+  ): Promise<void> {
+    await this.prisma.restrictedUser.deleteMany({
+      where: { restrictorId, restrictedId },
+    });
+  }
+
+  async listRestricted(userId: number) {
+    const rows = await this.prisma.restrictedUser.findMany({
+      where: { restrictorId: userId },
+      include: { restricted: { select: USER_SUMMARY_SELECT } },
+      orderBy: { createdAt: 'desc' },
+    });
+    return rows.map((row) => toUserSummary(row.restricted));
+  }
+
+  async muteUser(
+    muterId: number,
+    mutedId: number,
+    options: { mutePosts?: boolean; muteStories?: boolean },
+  ) {
+    if (muterId === mutedId) {
+      throw new BadRequestException('You cannot mute yourself');
+    }
+    const target = await this.prisma.user.findUnique({
+      where: { id: mutedId },
+    });
+    if (!target || target.deletedAt) {
+      throw new NotFoundException('User not found');
+    }
+
+    const mutePosts = options.mutePosts ?? true;
+    const muteStories = options.muteStories ?? true;
+    await this.prisma.mutedUser.upsert({
+      where: { muterId_mutedId: { muterId, mutedId } },
+      create: { muterId, mutedId, mutePosts, muteStories },
+      update: { mutePosts, muteStories },
+    });
+  }
+
+  async unmuteUser(muterId: number, mutedId: number): Promise<void> {
+    await this.prisma.mutedUser.deleteMany({ where: { muterId, mutedId } });
+  }
+
+  async listMuted(userId: number) {
+    const rows = await this.prisma.mutedUser.findMany({
+      where: { muterId: userId },
+      include: { muted: { select: USER_SUMMARY_SELECT } },
+      orderBy: { createdAt: 'desc' },
+    });
+    return rows.map((row) => ({
+      ...toUserSummary(row.muted),
+      mutePosts: row.mutePosts,
+      muteStories: row.muteStories,
+    }));
   }
 }

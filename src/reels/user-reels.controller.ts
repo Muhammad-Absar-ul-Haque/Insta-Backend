@@ -3,30 +3,21 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../common/types/authenticated-user.interface';
 import { CursorPaginationDto } from '../common/dto/cursor-pagination.dto';
-import { PostsService } from './posts.service';
+import { ReelsService } from './reels.service';
 
-@ApiTags('posts')
+@ApiTags('reels')
 @ApiBearerAuth()
 @Controller('users')
-export class UserPostsController {
-  constructor(private readonly postsService: PostsService) {}
+export class UserReelsController {
+  constructor(private readonly reelsService: ReelsService) {}
 
-  @Get(':userId/posts')
-  @ApiOperation({ summary: "List a user's posts" })
+  @Get(':userId/reels')
+  @ApiOperation({ summary: "List a user's reels (their reels grid)" })
   listByUser(
     @CurrentUser() user: AuthenticatedUser,
     @Param('userId', ParseIntPipe) userId: number,
     @Query() pagination: CursorPaginationDto,
   ) {
-    return this.postsService.listByUser(userId, user.id, pagination);
-  }
-
-  @Get('me/archived-posts')
-  @ApiOperation({ summary: 'List your own archived posts' })
-  listArchived(
-    @CurrentUser() user: AuthenticatedUser,
-    @Query() pagination: CursorPaginationDto,
-  ) {
-    return this.postsService.listArchived(user.id, pagination);
+    return this.reelsService.listByUser(userId, user.id, pagination);
   }
 }

@@ -16,6 +16,8 @@ import { AuthenticatedUser } from '../common/types/authenticated-user.interface'
 import { UsersService } from './users.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { RequestAvatarUploadDto } from './dto/request-avatar-upload.dto';
+import { DeleteAccountDto } from './dto/delete-account.dto';
+import { MuteUserDto } from './dto/mute-user.dto';
 
 @ApiTags('users')
 @ApiBearerAuth()
@@ -44,6 +46,26 @@ export class UsersController {
     @Body() _dto: RequestAvatarUploadDto,
   ) {
     return this.usersService.requestAvatarUpload(user.id);
+  }
+
+  @Post('me/deactivate')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary:
+      'Temporarily deactivate your own account (reactivates automatically on next login)',
+  })
+  deactivateMe(@CurrentUser() user: AuthenticatedUser) {
+    return this.usersService.deactivateMe(user.id);
+  }
+
+  @Delete('me')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Permanently delete your own account' })
+  deleteMe(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: DeleteAccountDto,
+  ) {
+    return this.usersService.deleteMe(user.id, dto);
   }
 
   @Get('me/blocked')
@@ -78,5 +100,62 @@ export class UsersController {
     @Param('username') username: string,
   ) {
     return this.usersService.getProfileByUsername(username, user.id);
+  }
+
+  @Get('me/restricted')
+  @ApiOperation({ summary: 'List users the current user has restricted' })
+  listRestricted(@CurrentUser() user: AuthenticatedUser) {
+    return this.usersService.listRestricted(user.id);
+  }
+
+  @Post(':userId/restrict')
+  @ApiOperation({
+    summary:
+      'Restrict a user — their comments on your posts become visible only to you and them, silently (no notification to them)',
+  })
+  restrictUser(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('userId', ParseIntPipe) userId: number,
+  ) {
+    return this.usersService.restrictUser(user.id, userId);
+  }
+
+  @Delete(':userId/restrict')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Unrestrict a user' })
+  unrestrictUser(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('userId', ParseIntPipe) userId: number,
+  ) {
+    return this.usersService.unrestrictUser(user.id, userId);
+  }
+
+  @Get('me/muted')
+  @ApiOperation({ summary: 'List users the current user has muted' })
+  listMuted(@CurrentUser() user: AuthenticatedUser) {
+    return this.usersService.listMuted(user.id);
+  }
+
+  @Post(':userId/mute')
+  @ApiOperation({
+    summary:
+      "Mute a user's posts and/or stories from your feed, without unfollowing them",
+  })
+  muteUser(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('userId', ParseIntPipe) userId: number,
+    @Body() dto: MuteUserDto,
+  ) {
+    return this.usersService.muteUser(user.id, userId, dto);
+  }
+
+  @Delete(':userId/mute')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Unmute a user' })
+  unmuteUser(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('userId', ParseIntPipe) userId: number,
+  ) {
+    return this.usersService.unmuteUser(user.id, userId);
   }
 }

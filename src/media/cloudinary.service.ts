@@ -53,7 +53,10 @@ export class CloudinaryService {
     const publicId = `${folder}/${ownerId}/${randomUUID()}`;
     const timestamp = Math.floor(Date.now() / 1000);
 
-    const signature = cloudinary.utils.api_sign_request({ public_id: publicId, timestamp }, this.apiSecret);
+    const signature = cloudinary.utils.api_sign_request(
+      { public_id: publicId, timestamp },
+      this.apiSecret,
+    );
 
     return {
       uploadUrl: `https://api.cloudinary.com/v1_1/${this.cloudName}/${resourceType}/upload`,

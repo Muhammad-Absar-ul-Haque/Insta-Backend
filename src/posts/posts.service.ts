@@ -86,6 +86,9 @@ export class PostsService {
     if (!post || post.deletedAt) {
       throw new NotFoundException('Post not found');
     }
+    if (post.isArchived && post.userId !== viewerId) {
+      throw new NotFoundException('Post not found');
+    }
     await this.assertVisible(post.userId, viewerId);
 
     const [likedIds, savedIds] = await Promise.all([
@@ -106,7 +109,7 @@ export class PostsService {
     await this.assertVisible(targetUserId, viewerId);
 
     const rows = await this.prisma.post.findMany({
-      where: { userId: targetUserId, deletedAt: null },
+      where: { userId: targetUserId, deletedAt: null, isArchived: false },
       include: POST_WITH_RELATIONS_INCLUDE,
       ...buildCursorArgs(pagination),
     });
@@ -126,6 +129,49 @@ export class PostsService {
       ),
       nextCursor,
     };
+  }
+
+  /** Owner-only view of their own archived posts. */
+  async listArchived(userId: number, pagination: CursorPaginationDto) {
+    const rows = await this.prisma.post.findMany({
+      where: { userId, deletedAt: null, isArchived: true },
+      include: POST_WITH_RELATIONS_INCLUDE,
+      ...buildCursorArgs(pagination),
+    });
+    const { items, nextCursor } = toCursorPage(rows, pagination.limit);
+    const postIds = items.map((p) => p.id);
+    const [likedIds, savedIds] = await Promise.all([
+      getLikedPostIds(this.prisma, userId, postIds),
+      getSavedPostIds(this.prisma, userId, postIds),
+    ]);
+
+    return {
+      items: items.map((post) =>
+        toPostSummary(post, {
+          isLiked: likedIds.has(post.id),
+          isSaved: savedIds.has(post.id),
+        }),
+      ),
+      nextCursor,
+    };
+  }
+
+  async setArchived(
+    userId: number,
+    postId: number,
+    isArchived: boolean,
+  ): Promise<void> {
+    const post = await this.prisma.post.findUnique({ where: { id: postId } });
+    if (!post || post.deletedAt) {
+      throw new NotFoundException('Post not found');
+    }
+    if (post.userId !== userId) {
+      throw new ForbiddenException('You can only archive your own posts');
+    }
+    await this.prisma.post.update({
+      where: { id: postId },
+      data: { isArchived },
+    });
   }
 
   async deletePost(userId: number, postId: number): Promise<void> {
@@ -152,7 +198,7 @@ export class PostsService {
     const target = await this.prisma.user.findUnique({
       where: { id: targetUserId },
     });
-    if (!target || target.deletedAt) {
+    if (!target || target.deletedAt || target.deactivatedAt) {
       throw new NotFoundException('User not found');
     }
     if (!target.isPrivate) return;

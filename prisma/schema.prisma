@@ -83,6 +83,7 @@ enum NotificationType {
 enum MessageType {
   text
   image
+  video
   post_share
 }
 
@@ -107,6 +108,11 @@ model User {
   lastLoginAt DateTime? @map("last_login_at")
   deletedAt   DateTime? @map("deleted_at")
 
+  deactivatedAt      DateTime? @map("deactivated_at")
+  showActivityStatus Boolean   @default(true) @map("show_activity_status")
+  lastActiveAt       DateTime? @map("last_active_at")
+  blockedKeywords    String[]  @default([]) @map("blocked_keywords")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -123,6 +129,10 @@ model User {
   following              Follow[]                  @relation("Follower")
   blockedByMe            BlockedUser[]             @relation("Blocker")
   blockedMe              BlockedUser[]             @relation("Blocked")
+  restrictedByMe         RestrictedUser[]          @relation("Restrictor")
+  restrictedMe           RestrictedUser[]          @relation("Restricted")
+  mutedByMe              MutedUser[]               @relation("Muter")
+  mutedMe                MutedUser[]               @relation("Muted")
   refreshTokens          RefreshToken[]
   passwordResetTokens    PasswordResetToken[]
   storyViews             StoryView[]
@@ -195,6 +205,32 @@ model BlockedUser {
   @@map("blocked_users")
 }
 
+model RestrictedUser {
+  id           Int      @id @default(autoincrement())
+  restrictorId Int      @map("restrictor_id")
+  restrictor   User     @relation("Restrictor", fields: [restrictorId], references: [id], onDelete: Cascade)
+  restrictedId Int      @map("restricted_id")
+  restricted   User     @relation("Restricted", fields: [restrictedId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@unique([restrictorId, restrictedId])
+  @@map("restricted_users")
+}
+
+model MutedUser {
+  id          Int      @id @default(autoincrement())
+  muterId     Int      @map("muter_id")
+  muter       User     @relation("Muter", fields: [muterId], references: [id], onDelete: Cascade)
+  mutedId     Int      @map("muted_id")
+  muted       User     @relation("Muted", fields: [mutedId], references: [id], onDelete: Cascade)
+  mutePosts   Boolean  @default(true) @map("mute_posts")
+  muteStories Boolean  @default(true) @map("mute_stories")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([muterId, mutedId])
+  @@map("muted_users")
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Posts, media, hashtags
 // ─────────────────────────────────────────────────────────────────────────
@@ -206,6 +242,8 @@ model Post {
   caption      String?
   likeCount    Int       @default(0) @map("like_count")
   commentCount Int       @default(0) @map("comment_count")
+  isArchived   Boolean   @default(false) @map("is_archived")
+  commentsDisabled Boolean @default(false) @map("comments_disabled")
   deletedAt    DateTime? @map("deleted_at")
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
@@ -290,8 +328,10 @@ model Like {
 
 model Comment {
   id              Int       @id @default(autoincrement())
-  postId          Int       @map("post_id")
-  post            Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  postId          Int?      @map("post_id")
+  post            Post?     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  reelId          Int?      @map("reel_id")
+  reel            Reel?     @relation(fields: [reelId], references: [id], onDelete: Cascade)
   userId          Int       @map("user_id")
   user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   parentCommentId Int?      @map("parent_comment_id")
@@ -299,10 +339,17 @@ model Comment {
   replies         Comment[] @relation("CommentReplies")
   content         String
   likeCount       Int       @default(0) @map("like_count")
+  isPinned        Boolean   @default(false) @map("is_pinned")
+  isFiltered      Boolean   @default(false) @map("is_filtered")
   deletedAt       DateTime? @map("deleted_at")
   createdAt       DateTime  @default(now()) @map("created_at")
 
+  // Exactly one of postId/reelId is set — enforced in CommentsService, not the DB,
+  // matching how this codebase already handles the Like/Report polymorphic targets.
+  // Kept as two real nullable FKs (not a generic targetId) specifically to keep
+  // onDelete: Cascade and referential integrity working.
   @@index([postId, createdAt])
+  @@index([reelId, createdAt])
   @@index([parentCommentId])
   @@map("comments")
 }
@@ -347,18 +394,21 @@ model StoryView {
 // ─────────────────────────────────────────────────────────────────────────
 
 model Reel {
-  id              Int       @id @default(autoincrement())
-  userId          Int       @map("user_id")
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  caption         String?
-  storageKey      String    @map("storage_key")
-  cdnUrl          String    @map("cdn_url")
-  durationSeconds Int?      @map("duration_seconds")
-  likeCount       Int       @default(0) @map("like_count")
-  commentCount    Int       @default(0) @map("comment_count")
-  viewCount       Int       @default(0) @map("view_count")
-  deletedAt       DateTime? @map("deleted_at")
-  createdAt       DateTime  @default(now()) @map("created_at")
+  id               Int       @id @default(autoincrement())
+  userId           Int       @map("user_id")
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  caption          String?
+  storageKey       String    @map("storage_key")
+  cdnUrl           String    @map("cdn_url")
+  durationSeconds  Int?      @map("duration_seconds")
+  likeCount        Int       @default(0) @map("like_count")
+  commentCount     Int       @default(0) @map("comment_count")
+  viewCount        Int       @default(0) @map("view_count")
+  commentsDisabled Boolean   @default(false) @map("comments_disabled")
+  deletedAt        DateTime? @map("deleted_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  comments Comment[]
 
   @@index([createdAt])
   @@map("reels")
@@ -407,6 +457,10 @@ model ConversationParticipant {
   user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   joinedAt          DateTime     @default(now()) @map("joined_at")
   lastReadMessageId Int?         @map("last_read_message_id")
+  // Reuses FollowStatus (pending|accepted) rather than a new enum — same two-state shape.
+  // A 1:1 conversation started by someone you don't follow lands as "pending" (a
+  // message request) for you specifically; the initiator's own row is always accepted.
+  requestStatus     FollowStatus @default(accepted) @map("request_status")
 
   @@id([conversationId, userId])
   @@map("conversation_participants")

@@ -91,10 +91,15 @@ export class AdminContentService {
         where: { id: commentId },
         data: { deletedAt: new Date() },
       }),
-      this.prisma.post.update({
-        where: { id: comment.postId },
-        data: { commentCount: { decrement: 1 } },
-      }),
+      comment.postId !== null
+        ? this.prisma.post.update({
+            where: { id: comment.postId },
+            data: { commentCount: { decrement: 1 } },
+          })
+        : this.prisma.reel.update({
+            where: { id: comment.reelId! },
+            data: { commentCount: { decrement: 1 } },
+          }),
     ]);
     await this.audit.log({
       adminId,

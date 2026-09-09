@@ -1,5 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsOptional,
   IsString,
@@ -38,4 +40,24 @@ export class UpdateProfileDto {
   @IsOptional()
   @IsBoolean()
   isPrivate?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Whether others can see your active-status/last-seen in Direct Messages',
+  })
+  @IsOptional()
+  @IsBoolean()
+  showActivityStatus?: boolean;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description:
+      'Comments containing any of these words/phrases are auto-hidden from your posts',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsString({ each: true })
+  @MaxLength(100, { each: true })
+  blockedKeywords?: string[];
 }

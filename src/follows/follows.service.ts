@@ -30,7 +30,7 @@ export class FollowsService {
     const target = await this.prisma.user.findUnique({
       where: { id: targetId },
     });
-    if (!target || target.deletedAt) {
+    if (!target || target.deletedAt || target.deactivatedAt) {
       throw new NotFoundException('User not found');
     }
 
@@ -177,7 +177,7 @@ export class FollowsService {
     const target = await this.prisma.user.findUnique({
       where: { id: targetUserId },
     });
-    if (!target || target.deletedAt) {
+    if (!target || target.deletedAt || target.deactivatedAt) {
       throw new NotFoundException('User not found');
     }
     if (!target.isPrivate) return;

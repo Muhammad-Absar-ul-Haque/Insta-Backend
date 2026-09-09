@@ -18,6 +18,7 @@ import { LikesService } from '../likes/likes.service';
 import { SavedService } from '../saved/saved.service';
 import { PostsService } from './posts.service';
 import { CreatePostDto } from './dto/create-post.dto';
+import { SavePostDto } from './dto/save-post.dto';
 
 @ApiTags('posts')
 @ApiBearerAuth()
@@ -77,12 +78,13 @@ export class PostsController {
 
   @Post(':id/save')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Save a post' })
+  @ApiOperation({ summary: 'Save a post, optionally into a named collection' })
   save(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', ParseIntPipe) id: number,
+    @Body() dto: SavePostDto,
   ) {
-    return this.savedService.save(user.id, id);
+    return this.savedService.save(user.id, id, dto.collectionName);
   }
 
   @Delete(':id/save')
@@ -93,5 +95,28 @@ export class PostsController {
     @Param('id', ParseIntPipe) id: number,
   ) {
     return this.savedService.unsave(user.id, id);
+  }
+
+  @Post(':id/archive')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary:
+      'Archive a post you own — hides it from your profile grid and the feed',
+  })
+  archive(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.postsService.setArchived(user.id, id, true);
+  }
+
+  @Post(':id/unarchive')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Unarchive a post you own' })
+  unarchive(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.postsService.setArchived(user.id, id, false);
   }
 }

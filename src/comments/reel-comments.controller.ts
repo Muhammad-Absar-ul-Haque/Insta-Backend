@@ -18,30 +18,30 @@ import { CreateCommentDto } from './dto/create-comment.dto';
 
 @ApiTags('comments')
 @ApiBearerAuth()
-@Controller('posts/:postId/comments')
-export class PostCommentsController {
+@Controller('reels/:reelId/comments')
+export class ReelCommentsController {
   constructor(private readonly commentsService: CommentsService) {}
 
   @Post()
-  @ApiOperation({ summary: 'Comment on a post' })
+  @ApiOperation({ summary: 'Comment on a reel' })
   create(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('postId', ParseIntPipe) postId: number,
+    @Param('reelId', ParseIntPipe) reelId: number,
     @Body() dto: CreateCommentDto,
   ) {
-    return this.commentsService.createTopLevel(user.id, 'post', postId, dto);
+    return this.commentsService.createTopLevel(user.id, 'reel', reelId, dto);
   }
 
   @Get()
-  @ApiOperation({ summary: 'List top-level comments on a post' })
+  @ApiOperation({ summary: 'List top-level comments on a reel' })
   list(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('postId', ParseIntPipe) postId: number,
+    @Param('reelId', ParseIntPipe) reelId: number,
     @Query() pagination: CursorPaginationDto,
   ) {
     return this.commentsService.listForTarget(
-      'post',
-      postId,
+      'reel',
+      reelId,
       user.id,
       pagination,
     );
@@ -53,43 +53,43 @@ export class PostCommentsController {
   })
   listFiltered(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('postId', ParseIntPipe) postId: number,
+    @Param('reelId', ParseIntPipe) reelId: number,
     @Query() pagination: CursorPaginationDto,
   ) {
     return this.commentsService.listFiltered(
       user.id,
-      'post',
-      postId,
+      'reel',
+      reelId,
       pagination,
     );
   }
 
   @Post('disable')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Turn off commenting on a post you own' })
+  @ApiOperation({ summary: 'Turn off commenting on a reel you own' })
   disable(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('postId', ParseIntPipe) postId: number,
+    @Param('reelId', ParseIntPipe) reelId: number,
   ) {
     return this.commentsService.setCommentsDisabled(
       user.id,
-      'post',
-      postId,
+      'reel',
+      reelId,
       true,
     );
   }
 
   @Post('enable')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Turn commenting back on for a post you own' })
+  @ApiOperation({ summary: 'Turn commenting back on for a reel you own' })
   enable(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('postId', ParseIntPipe) postId: number,
+    @Param('reelId', ParseIntPipe) reelId: number,
   ) {
     return this.commentsService.setCommentsDisabled(
       user.id,
-      'post',
-      postId,
+      'reel',
+      reelId,
       false,
     );
   }

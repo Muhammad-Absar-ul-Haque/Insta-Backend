@@ -67,6 +67,11 @@ export class StoriesService {
         userId: { in: authorIds },
         isActive: true,
         expiresAt: { gt: new Date() },
+        user: {
+          deletedAt: null,
+          deactivatedAt: null,
+          mutedMe: { none: { muterId: viewerId, muteStories: true } },
+        },
       },
       include: { user: { select: USER_SUMMARY_SELECT } },
       orderBy: { createdAt: 'asc' },
@@ -173,6 +178,9 @@ export class StoriesService {
     const author = await this.prisma.user.findUnique({
       where: { id: authorId },
     });
+    if (author?.deletedAt || author?.deactivatedAt) {
+      throw new NotFoundException('Story not found');
+    }
     if (!author || !author.isPrivate) return;
 
     const follow = await this.prisma.follow.findUnique({

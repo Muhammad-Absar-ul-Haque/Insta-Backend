@@ -1,13 +1,31 @@
-import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseIntPipe,
+  Post,
+  Req,
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
+import type { Request } from 'express';
 import { Public } from '../common/decorators/public.decorator';
-import { AuthService } from './auth.service';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { AuthenticatedUser } from '../common/types/authenticated-user.interface';
+import { AuthService, SessionMeta } from './auth.service';
 import { SignupDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+
+function sessionMetaFromRequest(req: Request): SessionMeta {
+  return { userAgent: req.headers['user-agent'], ip: req.ip };
+}
 
 @ApiTags('auth')
 @Controller('auth')
@@ -27,16 +45,19 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @Post('login')
   @ApiOperation({ summary: 'Log in with username/email + password' })
-  login(@Body() dto: LoginDto) {
-    return this.authService.login(dto);
+  login(@Body() dto: LoginDto, @Req() req: Request) {
+    return this.authService.login(dto, sessionMetaFromRequest(req));
   }
 
   @Public()
   @HttpCode(HttpStatus.OK)
   @Post('refresh')
   @ApiOperation({ summary: 'Exchange a refresh token for a new token pair' })
-  refresh(@Body() dto: RefreshDto) {
-    return this.authService.refresh(dto.refreshToken);
+  refresh(@Body() dto: RefreshDto, @Req() req: Request) {
+    return this.authService.refresh(
+      dto.refreshToken,
+      sessionMetaFromRequest(req),
+    );
   }
 
   @Public()
@@ -65,5 +86,26 @@ export class AuthController {
   })
   async resetPassword(@Body() dto: ResetPasswordDto) {
     await this.authService.resetPassword(dto);
+  }
+
+  @ApiBearerAuth()
+  @Get('sessions')
+  @ApiOperation({
+    summary:
+      'List active sessions (refresh tokens) for the current account, across devices',
+  })
+  listSessions(@CurrentUser() user: AuthenticatedUser) {
+    return this.authService.listSessions(user.id, user.rjti);
+  }
+
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Delete('sessions/:id')
+  @ApiOperation({ summary: 'Revoke a session (log it out remotely)' })
+  async revokeSession(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    await this.authService.revokeSession(user.id, id);
   }
 }

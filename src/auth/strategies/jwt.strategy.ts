@@ -8,6 +8,7 @@ import { AuthenticatedUser } from '../../common/types/authenticated-user.interfa
 export interface JwtAccessPayload {
   sub: number;
   username: string;
+  rjti?: string;
 }
 
 @Injectable()
@@ -39,6 +40,11 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       throw new UnauthorizedException('Account is no longer accessible');
     }
 
-    return { id: user.id, username: user.username, role: user.role };
+    return {
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      rjti: payload.rjti,
+    };
   }
 }

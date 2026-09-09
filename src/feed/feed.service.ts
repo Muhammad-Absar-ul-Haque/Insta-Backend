@@ -49,10 +49,18 @@ export class FeedService {
 
     const [cachedPostIds, celebrityPosts] = await Promise.all([
       this.feedCache.getPage(viewerId, beforeMs, pagination.limit + 1),
-      this.getCelebrityPosts(celebrityIds, beforeMs, pagination.limit + 1),
+      this.getCelebrityPosts(
+        celebrityIds,
+        beforeMs,
+        pagination.limit + 1,
+        viewerId,
+      ),
     ]);
 
-    const cachedPosts = await this.fetchPostsPreservingOrder(cachedPostIds);
+    const cachedPosts = await this.fetchPostsPreservingOrder(
+      cachedPostIds,
+      viewerId,
+    );
 
     const merged = [...cachedPosts, ...celebrityPosts]
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
@@ -91,9 +99,10 @@ export class FeedService {
     const rows = await this.prisma.post.findMany({
       where: {
         deletedAt: null,
+        isArchived: false,
         createdAt: { gte: since },
         userId: { notIn: [...excludedAuthorIds] },
-        user: { isPrivate: false },
+        user: { isPrivate: false, deletedAt: null, deactivatedAt: null },
       },
       include: POST_WITH_RELATIONS_INCLUDE,
       take: pagination.limit + 1,
@@ -145,12 +154,15 @@ export class FeedService {
     celebrityIds: number[],
     beforeMs: number | null,
     limit: number,
+    viewerId: number,
   ) {
     if (celebrityIds.length === 0) return [];
     return this.prisma.post.findMany({
       where: {
         userId: { in: celebrityIds },
         deletedAt: null,
+        isArchived: false,
+        user: { mutedMe: { none: { muterId: viewerId, mutePosts: true } } },
         ...(beforeMs !== null ? { createdAt: { lt: new Date(beforeMs) } } : {}),
       },
       include: POST_WITH_RELATIONS_INCLUDE,
@@ -161,10 +173,20 @@ export class FeedService {
 
   private async fetchPostsPreservingOrder(
     postIds: number[],
+    viewerId: number,
   ): Promise<PostWithRelations[]> {
     if (postIds.length === 0) return [];
     const posts = await this.prisma.post.findMany({
-      where: { id: { in: postIds }, deletedAt: null },
+      where: {
+        id: { in: postIds },
+        deletedAt: null,
+        isArchived: false,
+        user: {
+          deletedAt: null,
+          deactivatedAt: null,
+          mutedMe: { none: { muterId: viewerId, mutePosts: true } },
+        },
+      },
       include: POST_WITH_RELATIONS_INCLUDE,
     });
     const byId = new Map(posts.map((p) => [p.id, p]));

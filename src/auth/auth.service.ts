@@ -1,6 +1,7 @@
 import {
   ConflictException,
   Injectable,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -18,6 +19,11 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 export interface TokenPair {
   accessToken: string;
   refreshToken: string;
+}
+
+export interface SessionMeta {
+  userAgent?: string;
+  ip?: string;
 }
 
 const BCRYPT_ROUNDS = 12;
@@ -59,7 +65,7 @@ export class AuthService {
     return { user: this.toPublicUser(user), ...tokens };
   }
 
-  async login(dto: LoginDto) {
+  async login(dto: LoginDto, meta?: SessionMeta) {
     const user = await this.prisma.user.findFirst({
       where: {
         OR: [{ username: dto.usernameOrEmail }, { email: dto.usernameOrEmail }],
@@ -83,14 +89,15 @@ export class AuthService {
 
     await this.prisma.user.update({
       where: { id: user.id },
-      data: { lastLoginAt: new Date() },
+      // Logging back in is what reactivates a self-deactivated account.
+      data: { lastLoginAt: new Date(), deactivatedAt: null },
     });
 
-    const tokens = await this.issueTokenPair(user.id, user.username);
+    const tokens = await this.issueTokenPair(user.id, user.username, meta);
     return { user: this.toPublicUser(user), ...tokens };
   }
 
-  async refresh(refreshToken: string): Promise<TokenPair> {
+  async refresh(refreshToken: string, meta?: SessionMeta): Promise<TokenPair> {
     const payload = await this.verifyRefreshToken(refreshToken);
 
     const tokenHash = sha256(refreshToken);
@@ -121,7 +128,7 @@ export class AuthService {
       where: { id: stored.id },
       data: { revokedAt: new Date() },
     });
-    return this.issueTokenPair(user.id, user.username);
+    return this.issueTokenPair(user.id, user.username, meta);
   }
 
   async logout(refreshToken: string): Promise<void> {
@@ -187,16 +194,18 @@ export class AuthService {
   private async issueTokenPair(
     userId: number,
     username: string,
+    meta?: SessionMeta,
   ): Promise<TokenPair> {
+    const jti = randomUUID();
+
     const accessToken = await this.jwt.signAsync(
-      { sub: userId, username },
+      { sub: userId, username, rjti: jti },
       {
         secret: this.config.get<string>('jwt.accessSecret'),
         expiresIn: this.config.get<string>('jwt.accessExpiresIn'),
       },
     );
 
-    const jti = randomUUID();
     const refreshExpiresIn = this.config.get<string>('jwt.refreshExpiresIn')!;
     const refreshToken = await this.jwt.signAsync(
       { sub: userId, jti },
@@ -211,11 +220,38 @@ export class AuthService {
         jti,
         userId,
         tokenHash: sha256(refreshToken),
+        userAgent: meta?.userAgent,
+        ip: meta?.ip,
         expiresAt: new Date(Date.now() + msFromDuration(refreshExpiresIn)),
       },
     });
 
     return { accessToken, refreshToken };
+  }
+
+  async listSessions(userId: number, currentJti?: string) {
+    const rows = await this.prisma.refreshToken.findMany({
+      where: { userId, revokedAt: null, expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: 'desc' },
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      userAgent: row.userAgent,
+      ip: row.ip,
+      createdAt: row.createdAt,
+      expiresAt: row.expiresAt,
+      isCurrent: row.jti === currentJti,
+    }));
+  }
+
+  async revokeSession(userId: number, sessionId: number): Promise<void> {
+    const result = await this.prisma.refreshToken.updateMany({
+      where: { id: sessionId, userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    if (result.count === 0) {
+      throw new NotFoundException('Session not found');
+    }
   }
 
   private async verifyRefreshToken(

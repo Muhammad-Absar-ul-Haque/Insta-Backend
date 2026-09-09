@@ -41,6 +41,10 @@ export class MessagesGateway
       socket.data.userId = payload.sub;
       await socket.join(`user:${payload.sub}`);
       await this.presence.addSocket(payload.sub, socket.id);
+      await this.prisma.user.update({
+        where: { id: payload.sub },
+        data: { lastActiveAt: new Date() },
+      });
     } catch (error) {
       this.logger.warn(`Rejected messages socket: ${(error as Error).message}`);
       socket.disconnect(true);
@@ -51,6 +55,10 @@ export class MessagesGateway
     const userId = socket.data.userId as number | undefined;
     if (userId) {
       await this.presence.removeSocket(userId, socket.id);
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { lastActiveAt: new Date() },
+      });
     }
   }
 

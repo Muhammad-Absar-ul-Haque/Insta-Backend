@@ -89,6 +89,14 @@ export class LikesService {
           throw new NotFoundException('Reel not found');
         return reel.userId;
       }
+      case LikeTargetType.story: {
+        const story = await this.prisma.story.findUnique({
+          where: { id: targetId },
+        });
+        if (!story || !story.isActive || story.expiresAt < new Date())
+          throw new NotFoundException('Story not found');
+        return story.userId;
+      }
     }
   }
 
@@ -105,6 +113,8 @@ export class LikesService {
         return this.prisma.comment.update({ where: { id: targetId }, data });
       case LikeTargetType.reel:
         return this.prisma.reel.update({ where: { id: targetId }, data });
+      case LikeTargetType.story:
+        return this.prisma.story.update({ where: { id: targetId }, data });
     }
   }
 }

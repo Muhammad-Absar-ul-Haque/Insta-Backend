@@ -277,4 +277,41 @@ export class UsersService {
       muteStories: row.muteStories,
     }));
   }
+
+  /** "Who to follow" — the only bootstrap path out of an empty Home feed for a new
+   * account. No interest graph to rank against yet, so this ranks by follower count
+   * (a reasonable "popular accounts" heuristic) rather than anything personalized.
+   * Follower counts here include pending requests to private accounts, not just
+   * accepted follows — a deliberate simplification since this is a ranking signal,
+   * not a displayed number, and Prisma's relation-count ordering can't filter by status. */
+  async listSuggested(viewerId: number, limit: number) {
+    const [alreadyRelated, blocked] = await Promise.all([
+      this.prisma.follow.findMany({
+        where: { followerId: viewerId },
+        select: { followingId: true },
+      }),
+      this.prisma.blockedUser.findMany({
+        where: { OR: [{ blockerId: viewerId }, { blockedId: viewerId }] },
+        select: { blockerId: true, blockedId: true },
+      }),
+    ]);
+    const excludedIds = new Set<number>([
+      viewerId,
+      ...alreadyRelated.map((f) => f.followingId),
+      ...blocked.flatMap((b) => [b.blockerId, b.blockedId]),
+    ]);
+
+    const users = await this.prisma.user.findMany({
+      where: {
+        id: { notIn: [...excludedIds] },
+        deletedAt: null,
+        deactivatedAt: null,
+        isBanned: false,
+      },
+      select: USER_SUMMARY_SELECT,
+      orderBy: [{ followers: { _count: 'desc' } }, { id: 'desc' }],
+      take: limit,
+    });
+    return users.map(toUserSummary);
+  }
 }

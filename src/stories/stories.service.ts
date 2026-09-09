@@ -3,23 +3,28 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { FollowStatus } from '@prisma/client';
+import { FollowStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CloudinaryService } from '../media/cloudinary.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CursorPaginationDto } from '../common/dto/cursor-pagination.dto';
-import { buildCursorArgs, toCursorPage } from '../common/utils/pagination.util';
+import { toCursorPage } from '../common/utils/pagination.util';
 import {
   toUserSummary,
   USER_SUMMARY_SELECT,
   UserSummary,
 } from '../common/utils/user-summary.util';
 import { CreateStoryDto } from './dto/create-story.dto';
+import { StoryTextElementDto } from './dto/story-text-element.dto';
 
 export interface StoryItem {
   id: number;
   mediaType: string;
   cdnUrl: string;
   viewCount: number;
+  likeCount: number;
+  isLiked: boolean;
+  textElements: StoryTextElementDto[];
   createdAt: Date;
   expiresAt: Date;
   viewed: boolean;
@@ -32,6 +37,7 @@ export class StoriesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cloudinary: CloudinaryService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async create(userId: number, dto: CreateStoryDto) {
@@ -48,10 +54,46 @@ export class StoriesService {
         storageKey: signed.publicId,
         cdnUrl: signed.cdnUrl,
         expiresAt: new Date(Date.now() + STORY_TTL_MS),
+        textElements: (dto.textElements ??
+          []) as unknown as Prisma.InputJsonValue,
       },
     });
 
+    if (dto.textElements?.length) {
+      await this.notifyMentions(dto.textElements, userId, story.id);
+    }
+
     return { storyId: story.id, expiresAt: story.expiresAt, ...signed };
+  }
+
+  private async notifyMentions(
+    textElements: StoryTextElementDto[],
+    actorId: number,
+    storyId: number,
+  ): Promise<void> {
+    const usernames = textElements
+      .filter((el) => el.type === 'mention')
+      .map((el) => el.content);
+    if (usernames.length === 0) return;
+
+    const mentioned = await this.prisma.user.findMany({
+      where: { username: { in: usernames }, deletedAt: null },
+      select: { id: true },
+    });
+
+    await Promise.all(
+      mentioned
+        .filter((u) => u.id !== actorId)
+        .map((u) =>
+          this.notifications.create({
+            userId: u.id,
+            actorId,
+            type: 'mention',
+            targetType: 'story',
+            targetId: storyId,
+          }),
+        ),
+    );
   }
 
   /** Active stories from people the viewer follows, plus their own, grouped by author. */
@@ -77,14 +119,25 @@ export class StoriesService {
       orderBy: { createdAt: 'asc' },
     });
 
-    const viewedStoryIds = new Set(
-      (
-        await this.prisma.storyView.findMany({
-          where: { viewerId, storyId: { in: stories.map((s) => s.id) } },
+    const storyIds = stories.map((s) => s.id);
+    const [viewedStoryIds, likedStoryIds] = await Promise.all([
+      this.prisma.storyView
+        .findMany({
+          where: { viewerId, storyId: { in: storyIds } },
           select: { storyId: true },
         })
-      ).map((v) => v.storyId),
-    );
+        .then((rows) => new Set(rows.map((v) => v.storyId))),
+      this.prisma.like
+        .findMany({
+          where: {
+            userId: viewerId,
+            targetType: 'story',
+            targetId: { in: storyIds },
+          },
+          select: { targetId: true },
+        })
+        .then((rows) => new Set(rows.map((l) => l.targetId))),
+    ]);
 
     const grouped = new Map<
       number,
@@ -102,6 +155,10 @@ export class StoriesService {
         mediaType: story.mediaType,
         cdnUrl: story.cdnUrl,
         viewCount: story.viewCount,
+        likeCount: story.likeCount,
+        isLiked: likedStoryIds.has(story.id),
+        textElements: (story.textElements ??
+          []) as unknown as StoryTextElementDto[],
         createdAt: story.createdAt,
         expiresAt: story.expiresAt,
         viewed: viewedStoryIds.has(story.id),
@@ -158,13 +215,34 @@ export class StoriesService {
     const rows = await this.prisma.storyView.findMany({
       where: { storyId },
       include: { viewer: { select: USER_SUMMARY_SELECT } },
-      ...buildCursorArgs(pagination),
+      take: pagination.limit + 1,
+      ...(pagination.cursor !== undefined
+        ? { skip: 1, cursor: { id: pagination.cursor } }
+        : {}),
+      // StoryView orders by viewedAt, not createdAt — buildCursorArgs assumes the
+      // latter (true for every other model), so this can't use that shared helper.
+      orderBy: [{ viewedAt: 'desc' }, { id: 'desc' }],
     });
     const { items, nextCursor } = toCursorPage(rows, pagination.limit);
+
+    const likedViewerIds = new Set(
+      (
+        await this.prisma.like.findMany({
+          where: {
+            targetType: 'story',
+            targetId: storyId,
+            userId: { in: items.map((r) => r.viewerId) },
+          },
+          select: { userId: true },
+        })
+      ).map((l) => l.userId),
+    );
+
     return {
       items: items.map((r) => ({
         ...toUserSummary(r.viewer),
         viewedAt: r.viewedAt,
+        liked: likedViewerIds.has(r.viewerId),
       })),
       nextCursor,
     };

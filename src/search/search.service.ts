@@ -18,11 +18,13 @@ const RESULTS_PER_SECTION = 10;
 export class SearchService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async search(query: string) {
+  async search(query: string, viewerId: number) {
     const [users, hashtags] = await Promise.all([
       this.prisma.user.findMany({
         where: {
+          id: { not: viewerId },
           deletedAt: null,
+          deactivatedAt: null,
           OR: [
             { username: { contains: query, mode: 'insensitive' } },
             { fullName: { contains: query, mode: 'insensitive' } },

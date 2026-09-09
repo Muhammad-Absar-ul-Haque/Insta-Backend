@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { FollowStatus } from '@prisma/client';
+import { FollowStatus, MessageType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PostsService } from '../posts/posts.service';
 import { CloudinaryService } from '../media/cloudinary.service';
@@ -204,7 +204,7 @@ export class ConversationsService {
 
     const rows = await this.prisma.message.findMany({
       where: { conversationId },
-      include: { sender: { select: USER_SUMMARY_SELECT } },
+      include: this.messageInclude(),
       ...buildCursorArgs(pagination),
     });
     const { items, nextCursor } = toCursorPage(rows, pagination.limit);
@@ -246,9 +246,60 @@ export class ConversationsService {
         content: dto.content,
         mediaUrl: dto.mediaUrl,
       },
-      include: { sender: { select: USER_SUMMARY_SELECT } },
+      include: this.messageInclude(),
     });
 
+    await this.acceptIfPending(participant, conversationId, userId);
+
+    const dtoOut = this.toMessageDto(message);
+    this.gateway.pushMessage(conversationId, dtoOut);
+    return dtoOut;
+  }
+
+  /** A story reply always goes to the story owner's DMs — same message-request gating
+   * as a cold first DM (Instagram treats a story reply from a non-follower as a request
+   * too), reusing the same find-or-create-conversation logic `createConversation` uses. */
+  async replyToStory(replierId: number, storyId: number, content: string) {
+    const story = await this.prisma.story.findUnique({
+      where: { id: storyId },
+    });
+    if (!story || !story.isActive || story.expiresAt < new Date()) {
+      throw new NotFoundException('Story not found');
+    }
+    if (story.userId === replierId) {
+      throw new BadRequestException('You cannot reply to your own story');
+    }
+    await this.assertStoryVisible(story.userId, replierId);
+
+    const conversationId = await this.ensureDirectConversationId(
+      replierId,
+      story.userId,
+    );
+    const participant = await this.assertParticipant(replierId, conversationId);
+
+    const message = await this.prisma.message.create({
+      data: {
+        conversationId,
+        senderId: replierId,
+        messageType: MessageType.story_reply,
+        content,
+        storyId: story.id,
+      },
+      include: this.messageInclude(),
+    });
+
+    await this.acceptIfPending(participant, conversationId, replierId);
+
+    const dtoOut = this.toMessageDto(message);
+    this.gateway.pushMessage(conversationId, dtoOut);
+    return dtoOut;
+  }
+
+  private async acceptIfPending(
+    participant: { requestStatus: FollowStatus },
+    conversationId: number,
+    userId: number,
+  ): Promise<void> {
     // Sending a message into a still-pending request is how the recipient implicitly
     // accepts it — matches Instagram (replying to a request accepts it).
     if (participant.requestStatus === FollowStatus.pending) {
@@ -257,10 +308,63 @@ export class ConversationsService {
         data: { requestStatus: FollowStatus.accepted },
       });
     }
+  }
 
-    const dtoOut = this.toMessageDto(message);
-    this.gateway.pushMessage(conversationId, dtoOut);
-    return dtoOut;
+  private messageInclude() {
+    return {
+      sender: { select: USER_SUMMARY_SELECT },
+      story: { select: { id: true, cdnUrl: true, mediaType: true } },
+    };
+  }
+
+  /** Same visibility rule as viewing/replying to a story elsewhere: private account +
+   * not following → forbidden. Duplicated here rather than reaching into StoriesService,
+   * matching how this codebase already keeps each module's own visibility check local. */
+  private async assertStoryVisible(
+    authorId: number,
+    viewerId: number,
+  ): Promise<void> {
+    const author = await this.prisma.user.findUnique({
+      where: { id: authorId },
+    });
+    if (author?.deletedAt || author?.deactivatedAt) {
+      throw new NotFoundException('Story not found');
+    }
+    if (!author || !author.isPrivate) return;
+
+    const follow = await this.prisma.follow.findUnique({
+      where: {
+        followerId_followingId: { followerId: viewerId, followingId: authorId },
+      },
+    });
+    if (follow?.status !== FollowStatus.accepted) {
+      throw new ForbiddenException('This account is private');
+    }
+  }
+
+  private async ensureDirectConversationId(
+    userId: number,
+    otherId: number,
+  ): Promise<number> {
+    const existing = await this.findExistingDirectConversation(userId, otherId);
+    if (existing) return existing.id;
+
+    const recipientRequestStatus = await this.determineRequestStatus(
+      otherId,
+      userId,
+    );
+    const conversation = await this.prisma.conversation.create({
+      data: {
+        isGroup: false,
+        participants: {
+          create: [
+            { userId, requestStatus: FollowStatus.accepted },
+            { userId: otherId, requestStatus: recipientRequestStatus },
+          ],
+        },
+      },
+    });
+    return conversation.id;
   }
 
   async requestMediaUpload(
@@ -317,7 +421,7 @@ export class ConversationsService {
       messages: {
         orderBy: { createdAt: 'desc' as const },
         take: 1,
-        include: { sender: { select: USER_SUMMARY_SELECT } },
+        include: this.messageInclude(),
       },
     };
   }
@@ -391,6 +495,7 @@ export class ConversationsService {
     messageType: string;
     createdAt: Date;
     sender: Parameters<typeof toUserSummary>[0];
+    story?: { id: number; cdnUrl: string; mediaType: string } | null;
   }) {
     return {
       id: message.id,
@@ -400,6 +505,7 @@ export class ConversationsService {
       messageType: message.messageType,
       createdAt: message.createdAt,
       sender: toUserSummary(message.sender),
+      story: message.story ?? null,
     };
   }
 }

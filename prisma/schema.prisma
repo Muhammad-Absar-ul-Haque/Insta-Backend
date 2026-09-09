@@ -31,6 +31,7 @@ enum LikeTargetType {
   post
   comment
   reel
+  story
 }
 
 enum ReportTargetType {
@@ -85,6 +86,7 @@ enum MessageType {
   image
   video
   post_share
+  story_reply
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -236,17 +238,17 @@ model MutedUser {
 // ─────────────────────────────────────────────────────────────────────────
 
 model Post {
-  id           Int       @id @default(autoincrement())
-  userId       Int       @map("user_id")
-  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  caption      String?
-  likeCount    Int       @default(0) @map("like_count")
-  commentCount Int       @default(0) @map("comment_count")
-  isArchived   Boolean   @default(false) @map("is_archived")
-  commentsDisabled Boolean @default(false) @map("comments_disabled")
-  deletedAt    DateTime? @map("deleted_at")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
+  id               Int       @id @default(autoincrement())
+  userId           Int       @map("user_id")
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  caption          String?
+  likeCount        Int       @default(0) @map("like_count")
+  commentCount     Int       @default(0) @map("comment_count")
+  isArchived       Boolean   @default(false) @map("is_archived")
+  commentsDisabled Boolean   @default(false) @map("comments_disabled")
+  deletedAt        DateTime? @map("deleted_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
 
   media    PostMedia[]
   comments Comment[]
@@ -359,18 +361,26 @@ model Comment {
 // ─────────────────────────────────────────────────────────────────────────
 
 model Story {
-  id         Int       @id @default(autoincrement())
-  userId     Int       @map("user_id")
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  mediaType  MediaType @map("media_type")
-  storageKey String    @map("storage_key")
-  cdnUrl     String    @map("cdn_url")
-  viewCount  Int       @default(0) @map("view_count")
-  isActive   Boolean   @default(true) @map("is_active")
-  expiresAt  DateTime  @map("expires_at")
-  createdAt  DateTime  @default(now()) @map("created_at")
+  id           Int       @id @default(autoincrement())
+  userId       Int       @map("user_id")
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mediaType    MediaType @map("media_type")
+  storageKey   String    @map("storage_key")
+  cdnUrl       String    @map("cdn_url")
+  viewCount    Int       @default(0) @map("view_count")
+  likeCount    Int       @default(0) @map("like_count")
+  // Freeform positioned overlay (caption text + @mention "stickers"), an ordered array of
+  // { type: 'text' | 'mention', content, x, y, fontSize?, color?, rotation? } — x/y are
+  // normalized 0-1 so the same story renders correctly on any screen size. Kept as JSON
+  // rather than a relational model since the element shape is inherently variable and
+  // nothing else in the app needs to query into it.
+  textElements Json?     @map("text_elements")
+  isActive     Boolean   @default(true) @map("is_active")
+  expiresAt    DateTime  @map("expires_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
 
-  views StoryView[]
+  views   StoryView[]
+  replies Message[]
 
   @@index([userId, expiresAt])
   @@index([expiresAt])
@@ -475,6 +485,10 @@ model Message {
   content        String?
   mediaUrl       String?      @map("media_url")
   messageType    MessageType  @default(text) @map("message_type")
+  // Set only for messageType story_reply — SetNull (not Cascade) so a reply stays in the
+  // conversation with its text intact even once the referenced story naturally expires.
+  storyId        Int?         @map("story_id")
+  story          Story?       @relation(fields: [storyId], references: [id], onDelete: SetNull)
   createdAt      DateTime     @default(now()) @map("created_at")
 
   @@index([conversationId, createdAt])

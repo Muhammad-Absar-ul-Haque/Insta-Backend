@@ -9,6 +9,7 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -18,6 +19,7 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 import { RequestAvatarUploadDto } from './dto/request-avatar-upload.dto';
 import { DeleteAccountDto } from './dto/delete-account.dto';
 import { MuteUserDto } from './dto/mute-user.dto';
+import { ListSuggestedQueryDto } from './dto/list-suggested-query.dto';
 
 @ApiTags('users')
 @ApiBearerAuth()
@@ -72,6 +74,18 @@ export class UsersController {
   @ApiOperation({ summary: 'List users the current user has blocked' })
   listBlocked(@CurrentUser() user: AuthenticatedUser) {
     return this.usersService.listBlocked(user.id);
+  }
+
+  @Get('me/suggested')
+  @ApiOperation({
+    summary:
+      "Accounts to suggest following — the 'who to follow' bootstrap list, ranked by follower count since there's no interest graph to personalize against",
+  })
+  listSuggested(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ListSuggestedQueryDto,
+  ) {
+    return this.usersService.listSuggested(user.id, query.limit);
   }
 
   @Post(':userId/block')

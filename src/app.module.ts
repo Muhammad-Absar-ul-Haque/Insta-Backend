@@ -1,7 +1,9 @@
-import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { randomUUID } from 'crypto';
+import { LoggerModule } from 'nestjs-pino';
 import configuration from './config/configuration';
 import { validate } from './config/env.validation';
 import { PrismaModule } from './prisma/prisma.module';
@@ -27,7 +29,6 @@ import { ReportsModule } from './reports/reports.module';
 import { AdminModule } from './admin/admin.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
-import { LoggingMiddleware } from './common/middleware/logging.middleware';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -37,6 +38,23 @@ import { AppService } from './app.service';
       isGlobal: true,
       load: [configuration],
       validate,
+    }),
+    LoggerModule.forRoot({
+      pinoHttp: {
+        genReqId: (req) =>
+          req.headers['x-request-id']?.toString() ?? randomUUID(),
+        // Structured JSON in prod (for log aggregation); readable output locally.
+        transport:
+          process.env.NODE_ENV === 'production'
+            ? undefined
+            : { target: 'pino-pretty', options: { singleLine: true } },
+        redact: ['req.headers.authorization', 'req.headers.cookie'],
+        customLogLevel: (_req, res, err) => {
+          if (err || res.statusCode >= 500) return 'error';
+          if (res.statusCode >= 400) return 'warn';
+          return 'info';
+        },
+      },
     }),
     ThrottlerModule.forRoot([
       {
@@ -75,8 +93,4 @@ import { AppService } from './app.service';
     { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
-export class AppModule implements NestModule {
-  configure(consumer: MiddlewareConsumer) {
-    consumer.apply(LoggingMiddleware).forRoutes('*');
-  }
-}
+export class AppModule {}

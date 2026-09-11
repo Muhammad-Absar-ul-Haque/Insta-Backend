@@ -31,4 +31,8 @@ export default () => ({
     ttl: parseInt(process.env.THROTTLE_TTL ?? '60', 10),
     limit: parseInt(process.env.THROTTLE_LIMIT ?? '20', 10),
   },
+
+  sentry: {
+    dsn: process.env.SENTRY_DSN || undefined,
+  },
 });

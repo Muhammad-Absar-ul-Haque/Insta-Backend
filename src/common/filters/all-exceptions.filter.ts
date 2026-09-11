@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { Sentry } from '../sentry/sentry';
 
 /**
  * Catches every exception (expected HttpExceptions like NotFoundException, and
@@ -41,6 +42,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
         logLine,
         exception instanceof Error ? exception.stack : undefined,
       );
+      Sentry.captureException(exception);
     } else {
       // Expected client-facing errors (validation, 401/403/404/409...) — message is enough, no stack noise.
       this.logger.warn(logLine);

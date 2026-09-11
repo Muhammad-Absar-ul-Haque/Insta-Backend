@@ -22,7 +22,16 @@ async function bootstrap() {
   await redisIoAdapter.connectToRedis();
   app.useWebSocketAdapter(redisIoAdapter);
 
-  app.use(helmet());
+  // Swagger UI needs inline scripts/styles, which helmet's default CSP blocks —
+  // relax CSP only on the docs route, keep the strict default everywhere else.
+  const strictHelmet = helmet();
+  const relaxedHelmet = helmet({ contentSecurityPolicy: false });
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/docs')) {
+      return relaxedHelmet(req, res, next);
+    }
+    return strictHelmet(req, res, next);
+  });
   app.use(compression());
   app.useGlobalFilters(new AllExceptionsFilter());
   app.enableCors({
